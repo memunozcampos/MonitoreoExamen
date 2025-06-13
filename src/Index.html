@@ -482,7 +482,7 @@
         return;
       }
       
-      startSession(email);
+      google.script.run.withSuccessHandler(function(response) { console.log('Login time recorded:', response); startSession(email); }).withFailureHandler(handleError).recordLoginTime(email, new Date().toISOString());
     }
 
     function showLogin() {
@@ -525,10 +525,10 @@
       document.getElementById('auth-container').innerHTML = `
         <h1>Bienvenido, <span id="student-name">${sessionData.fullName}</span></h1>
         <div id="countdown">Cargando contador...</div>
-        <iframe id="form-iframe" src="${data.url}" style="width:100%; height:80vh;"></iframe>
+        <iframe id="form-iframe" src="${data.url}" class="form-frame" style="width:100%;"></iframe>
       `;
       
-      //startCountdown();
+      startCountdown();
       setupVisibilityListener();
     }
 
@@ -556,40 +556,57 @@
           clearInterval(countdownInterval);
           document.getElementById('form-iframe').style.display = 'none';
           document.getElementById('countdown').innerHTML = 'Tiempo finalizado!';
+          document.removeEventListener('visibilitychange', handleVisibilityChange);
+          console.log('Time is up. Removed visibilitychange listener.');
           return;
         }
         
+        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
         const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
         const secs = Math.floor((diff % (1000 * 60)) / 1000);
         
-        if (mins === 1 && secs === 0) {
-          alert('¡Solo queda 1 minuto! Envía el formulario ahora.');
+        let timeString = '';
+        // Display hours only if hours > 0, otherwise display only minutes and seconds
+        if (hours > 0) {
+            timeString = `${hours}:${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
+        } else {
+            timeString = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+        }
+
+        if (hours === 0 && mins === 1 && secs === 0) {
+          alert('Debe enviar el formulario lo ante posible.');
         }
         
-        document.getElementById('countdown').innerHTML = 
-          `Tiempo restante: ${mins}:${secs < 10 ? '0' : ''}${secs}`;
+        document.getElementById('countdown').innerHTML = `Tiempo restante: ${timeString}`;
       }, 1000);
+    }
+
+    function handleVisibilityChange() {
+      if (document.hidden) {
+        const now = new Date();
+        // Check if target time has been reached or passed
+        if (now.getHours() >= <?= CONFIG.targetHour ?>) {
+          document.removeEventListener('visibilitychange', handleVisibilityChange);
+          console.log('Target hour reached or passed, visibility listener removed.');
+          return;
+        }
+        // If target time has NOT been reached
+        google.script.run.registerFraudAttempt(
+          now.toISOString(),
+          sessionData.email.split("@")[0],
+          sessionData.fullName,
+          sessionData.section
+        );
+        alert('¡Se registró un cambio de ventana! \nFecha y hora: ' + now.toISOString());
+        startBeep();
+      } else {
+        stopBeep();
+      }
     }
 
     function setupVisibilityListener() {
       console.log('Configurando listener de visibilidad...');
-      document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-          const now = new Date();
-          if (now.getHours() < <?= CONFIG.targetHour ?>) {
-            google.script.run.registerFraudAttempt(
-              now.toISOString(),
-              sessionData.email.split("@")[0],
-              sessionData.fullName, 
-              sessionData.section
-            );
-            alert('¡Se registró un cambio de ventana! \nFecha y hora: ' + now.toISOString());
-            startBeep();
-          }
-        } else {
-          stopBeep();
-        }
-      });
+      document.addEventListener('visibilitychange', handleVisibilityChange);
     }
     
     
