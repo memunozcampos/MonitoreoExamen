@@ -79,11 +79,7 @@ function generateFormUrl(email) {
     } catch (e) {
       console.error("se generó un error en el bucle" + e.message)
     }
-    //const queryString = Object.entries(responses).map(([id, val]) => 
-    //       `entry.${id}=${encodeURIComponent(val)}`).join('&');
     
-    //const url = `${form.getPublishedUrl()}?usp=pp_url&${queryString}`;
-
     const url = response.toPrefilledUrl()
     console.log('URL generada:', url);
     
