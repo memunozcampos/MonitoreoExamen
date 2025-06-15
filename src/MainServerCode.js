@@ -1,10 +1,3 @@
-const CONFIG = {
-  spreadsheetId: '1bGio7dHqUM5ZQ39hlU9qVY9Q-zIyE7qJctiM2I9KtqU',
-  formId: '16sEFd4gZtuPkt2b0b5GNsbaTEZGNhyCX9DslqWRgkyE',
-  domain: '@clases.edu.sv',
-  targetHour: 14
-};
-
 function doGet() {
   console.log('Solicitud GET recibida');
   return HtmlService.createTemplateFromFile('Index')
