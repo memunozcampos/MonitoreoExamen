@@ -1,2 +1,3 @@
 .clasp.json
 .idx/dev.nix
+src/Settings.js
