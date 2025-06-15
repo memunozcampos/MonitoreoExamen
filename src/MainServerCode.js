@@ -12,22 +12,6 @@ function doGet() {
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
-function getUserEmail() {
-  try {
-    Logger.log('Attempting to get active user email.');
-    const email = Session.getActiveUser().getEmail();
-    if (!email) {
-      Logger.log('Session.getActiveUser().getEmail() returned null or empty.');
-      return null;
-    }
-    Logger.log('User email obtained: ' + email);
-    return email;
-  } catch (e) {
-    console.error('Error al obtener email:', e.message);
-    return null;
-  }
-}
-
 function generateFormUrl(email) {
   try {
     console.log('Generando URL para:', email);

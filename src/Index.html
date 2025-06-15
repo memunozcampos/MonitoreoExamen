@@ -4,6 +4,35 @@
   <base target="_top">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
+    #form-display-area.iframe-maximized-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 1000;
+      background-color: white;
+      padding: 0;
+      margin: 0;
+    }
+
+    #form-display-area.iframe-maximized-container iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+
+    .countdown-container.fixed-countdown {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 1001;
+      width: auto;
+      padding: 10px;
+      background-color: rgba(0,0,0,0.7);
+      color: white;
+      border-radius: 5px;
+    }
      /* Variables y estilos base */
     :root {
       --primary: #4285f4;
@@ -413,7 +442,7 @@
   </style>
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 
 </head>
 
@@ -430,17 +459,18 @@
     </div>
     
     <div id="auth-container" class="auth-container">
-      <!-- Aquí se inyectará el contenido dinámico -->
       <div class="auth-card">
         <div class="auth-icon">
           <i class="fas fa-user-lock"></i>
         </div>
         <h1 class="auth-title">Autenticación Requerida</h1>
         <p class="auth-text">Por favor inicia sesión con tu cuenta institucional para acceder al sistema de asistencia</p>
-        <button class="btn" onclick="google.script.run.withSuccessHandler(checkAuth).getUserEmail()">
-          <i class="fab fa-google"></i> Iniciar sesión con Google
-        </button>
+        <!-- GSI button will be rendered here by init() -->
       </div>
+    </div>
+
+    <div id="app-content" style="display:none;">
+      <!-- Welcome message, countdown, iframe will be injected here by initApp() -->
     </div>
     
     <div class="footer">
@@ -452,81 +482,185 @@
     let sessionData = {};
     let beepInterval;
     let countdownInterval;
-    let email = null;
+    // let email = null; // Removed as email is now handled by GSI flow
 
     function init() {
-      console.log('Inicializando aplicación...');
-      document.getElementById('status').innerText = 'Verificando autenticación...';
-      
-      google.script.run
-        .withSuccessHandler(checkAuth)
-        .withFailureHandler(handleError)
-        .getUserEmail();
+      console.log('Inicializando aplicación GSI...');
+      // IMPORTANT: Replace 'YOUR_GOOGLE_CLIENT_ID_HERE' with your actual Google Cloud Client ID.
+      google.accounts.id.initialize({
+        client_id: 'YOUR_GOOGLE_CLIENT_ID_HERE',
+        callback: handleGoogleSignInResponse
+      });
+
+      const gsiButtonParent = document.querySelector('#auth-container .auth-card');
+      if (gsiButtonParent) {
+          const oldButton = gsiButtonParent.querySelector('.btn'); // Remove old custom button
+          if (oldButton) oldButton.remove();
+
+          const buttonDiv = document.createElement('div');
+          buttonDiv.id = 'gsiButtonDiv';
+          gsiButtonParent.appendChild(buttonDiv);
+
+          google.accounts.id.renderButton(
+            buttonDiv,
+            { theme: 'outline', size: 'large', type: 'standard', text: 'signin_with' }
+          );
+      }
+      google.accounts.id.prompt();
+    }
+
+    function handleGoogleSignInResponse(response) {
+      console.log('Respuesta de GSI:', response);
+      if (response.credential) {
+        const userData = parseJwtPayload(response.credential);
+        if (userData && userData.email) {
+          console.log('GSI Sign-In Success:', userData);
+          // sessionData.name = userData.name; // Store if needed, though generateFormUrl will fetch full name
+          checkAuth(userData.email);
+        } else {
+          console.error('GSI Sign-In Error or email not found in token.');
+          handleError({ message: 'Error de inicio de sesión con Google. No se pudo obtener el correo.' });
+        }
+      } else {
+        console.error('GSI response does not contain credential.');
+        handleError({ message: 'Respuesta de inicio de sesión inválida.' });
+      }
+    }
+
+    function parseJwtPayload(token) {
+      try {
+        const base64Url = token.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+        return JSON.parse(jsonPayload);
+      } catch (e) {
+        console.error('Error decoding JWT:', e);
+        return null;
+      }
     }
 
     function checkAuth(email) {
-      console.log('Respuesta de autenticación:', email);
-      // comentario de prueba desde clasp
+      console.log('Verificando email:', email);
       if (!email) {
-        showLogin();
+        showLogin(); // Should ideally not happen if GSI worked
         return;
       }
       
       const domain = '<?= CONFIG.domain ?>';
       if (!email.endsWith(domain)) {
-        document.getElementById('auth-container').innerHTML = `
-          <h1>Cuenta no válida</h1>
-          <p>Por favor inicia sesión con ${domain}</p>
-          <button onclick="showLogin()">Cambiar cuenta</button>
+        const authContainer = document.getElementById('auth-container');
+        authContainer.innerHTML = `
+          <div class="auth-card">
+            <div class="auth-icon"><i class="fas fa-exclamation-triangle" style="color: var(--danger);"></i></div>
+            <h1 class="auth-title">Cuenta no válida</h1>
+            <p class="auth-text">El correo <strong>${email}</strong> no pertenece al dominio ${domain}.</p>
+            <p class="auth-text">Puedes <a href="#" onclick="event.preventDefault(); google.accounts.id.prompt();">cambiar de cuenta de Google</a> y volver a intentarlo.</p>
+          </div>
         `;
+        authContainer.style.display = 'block'; // Or 'flex'
+        document.getElementById('app-content').style.display = 'none';
         return;
       }
       
-      google.script.run.withSuccessHandler(function(response) { console.log('Login time recorded:', response); startSession(email); }).withFailureHandler(handleError).recordLoginTime(email, new Date().toISOString());
+      // Show loading message while server calls are made
+      const authCard = document.querySelector('#auth-container .auth-card');
+      if(authCard) {
+        authCard.innerHTML = '<p class="auth-text">Verificando datos y preparando formulario...</p>';
+      }
+      document.getElementById('auth-container').style.display = 'block'; // or 'flex'
+      document.getElementById('app-content').style.display = 'none';
+
+      google.script.run
+        .withSuccessHandler(function(response) {
+          console.log('Login time recorded:', response);
+          startSession(email); // Proceed to start session
+        })
+        .withFailureHandler(handleError)
+        .recordLoginTime(email, new Date().toISOString());
     }
 
     function showLogin() {
-      console.log('Mostrando pantalla de login');
-      document.getElementById('auth-container').innerHTML = `
-        <h1>Autenticación requerida</h1>
-        <button onclick="google.script.run
-          .withSuccessHandler(checkAuth)
-          .withFailureHandler(handleError)
-          .getUserEmail()">
-          Iniciar sesión con Google
-        </button>
-      `;
+      console.log('Mostrando pantalla de login / GSI prompt.');
+      document.getElementById('auth-container').style.display = 'block'; // Or 'flex'
+      document.getElementById('app-content').style.display = 'none';
+      // Re-render GSI button if it was removed or to ensure it's fresh
+      const gsiButtonParent = document.querySelector('#auth-container .auth-card');
+      if (gsiButtonParent && !document.getElementById('gsiButtonDiv')) {
+          const buttonDiv = document.createElement('div');
+          buttonDiv.id = 'gsiButtonDiv';
+           // Clear previous custom button if any, and append new button div
+           const oldContent = gsiButtonParent.querySelectorAll('h1, p, .btn, .auth-icon'); // Clear more specific content
+           oldContent.forEach(el => el.remove());
+
+           // Add back title and icon if desired, or keep it minimal
+           gsiButtonParent.innerHTML = `
+            <div class="auth-icon"><i class="fas fa-user-lock"></i></div>
+            <h1 class="auth-title">Autenticación Requerida</h1>
+            <p class="auth-text">Por favor inicia sesión con tu cuenta institucional...</p>
+           `;
+          gsiButtonParent.appendChild(buttonDiv);
+          google.accounts.id.renderButton(
+            buttonDiv,
+            { theme: 'outline', size: 'large', type: 'standard', text: 'signin_with' }
+          );
+      }
+      google.accounts.id.prompt();
     }
 
-    function startSession(email) {
-      console.log('Iniciando sesión para:', email);
-      document.getElementById('auth-container').innerText = 'Cargando formulario...';
-      
+    function startSession(userEmail) { // Renamed parameter to avoid conflict with any lingering global 'email'
+      console.log('Iniciando sesión para:', userEmail);
+      // Message already shown by checkAuth or init
       google.script.run
         .withSuccessHandler(initApp)
         .withFailureHandler(handleError)
-        .generateFormUrl(email);
+        .generateFormUrl(userEmail);
     }
 
     function initApp(data) {
-      console.log('Datos recibidos:', data);
+      console.log('Datos recibidos para iniciar la app:', data);
       
       if (data.error) {
-        document.getElementById('auth-container').innerHTML = `
-          <h1>Error</h1>
-          <p>${data.error}</p>
-          <button onclick="init()">Reintentar</button>
-        `;
+        handleError({message: data.error}); // Use handleError for consistency
         return;
       }
       
       sessionData = data.studentData;
       
-      document.getElementById('auth-container').innerHTML = `
-        <h1>Bienvenido, <span id="student-name">${sessionData.fullName}</span></h1>
-        <div id="countdown">Cargando contador...</div>
-        <iframe id="form-iframe" src="${data.url}" class="form-frame" style="width:100%;"></iframe>
+      document.getElementById('auth-container').style.display = 'none';
+      const appContentDiv = document.getElementById('app-content');
+      appContentDiv.innerHTML = `
+        <div class="main-content">
+          <div class="welcome-section" id="welcome-area">
+            <h1 class="welcome-title">Bienvenido, <span id="student-name">${sessionData.fullName}</span></h1>
+            <p class="welcome-text">Correo: ${sessionData.email} | Sección: ${sessionData.section}</p>
+            <p class="welcome-text" style="margin-top: 20px;">Cuando estés listo para comenzar la evaluación, presiona el botón de abajo.</p>
+            <button id="start-assessment-btn" class="btn" style="margin-top: 10px;">Comenzar Evaluación</button>
+          </div>
+          <div id="assessment-area" style="display:none;">
+              <div id="countdown" class="countdown-container">Cargando contador...</div>
+              <div id="form-display-area">
+                  <iframe id="form-iframe" src=""></iframe> <!-- src will be set in startAssessmentFlow -->
+              </div>
+          </div>
+        </div>
       `;
+      appContentDiv.style.display = 'block';
+      document.getElementById('start-assessment-btn').addEventListener('click', function() { startAssessmentFlow(data.url); });
+    }
+
+    function startAssessmentFlow(formUrl) {
+      document.getElementById('welcome-area').style.display = 'none';
+      // Assuming header and footer are outside #app-content or managed by its visibility.
+      // If specific header/footer elements outside #app-content need hiding:
+      // document.querySelector('.header').style.display = 'none';
+      // document.querySelector('.footer').style.display = 'none';
+
+      document.getElementById('assessment-area').style.display = 'block';
+      document.getElementById('form-display-area').classList.add('iframe-maximized-container');
+      document.getElementById('countdown').classList.add('fixed-countdown');
+      document.getElementById('form-iframe').src = formUrl;
       
       startCountdown();
       setupVisibilityListener();
@@ -534,11 +668,19 @@
 
     function handleError(error) {
       console.error('Error en cliente:', error);
-      document.getElementById('auth-container').innerHTML = `
-        <h1>Error</h1>
-        <p>${error.message || error}</p>
-        <button onclick="init()">Reintentar</button>
+      const authContainer = document.getElementById('auth-container');
+      const appContentDiv = document.getElementById('app-content');
+
+      appContentDiv.style.display = 'none'; // Hide app content
+      authContainer.innerHTML = `
+        <div class="auth-card">
+            <div class="auth-icon"><i class="fas fa-exclamation-circle" style="color:var(--danger);"></i></div>
+            <h1 class="auth-title">Error</h1>
+            <p class="auth-text">${error.message || 'Ocurrió un error desconocido.'}</p>
+            <p class="auth-text">Por favor, <a href="#" onclick="event.preventDefault(); window.location.reload();">refresca la página</a> e intenta de nuevo.</p>
+        </div>
       `;
+      authContainer.style.display = 'block'; // or 'flex'
     }
 
     function startCountdown() {
@@ -554,8 +696,12 @@
         const diff = target - new Date();
         if (diff <= 0) {
           clearInterval(countdownInterval);
-          document.getElementById('form-iframe').style.display = 'none';
-          document.getElementById('countdown').innerHTML = 'Tiempo finalizado!';
+          document.getElementById('form-display-area').classList.remove('iframe-maximized-container');
+          document.getElementById('countdown').classList.remove('fixed-countdown');
+          // document.querySelector('.header').style.display = 'flex'; // Or 'block'
+          // document.querySelector('.footer').style.display = 'block';
+          document.getElementById('form-display-area').style.display = 'none'; // Hide the form area
+          document.getElementById('countdown').innerHTML = 'Tiempo finalizado!'; // This message might be less visible now
           document.removeEventListener('visibilitychange', handleVisibilityChange);
           console.log('Time is up. Removed visibilitychange listener.');
           return;
@@ -576,7 +722,7 @@
         if (hours === 0 && mins === 1 && secs === 0) {
           alert('Debe enviar el formulario lo ante posible.');
         }
-        
+
         document.getElementById('countdown').innerHTML = `Tiempo restante: ${timeString}`;
       }, 1000);
     }
